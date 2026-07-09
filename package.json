@@ -1,5 +1,5 @@
 {
-  "name": "spssread",
+  "name": "spssreader",
   "version": "0.1.0",
   "description": "Correct, zero-dependency SPSS .sav/.zsav reader for the browser and Node — validated against R haven.",
   "license": "MIT",
@@ -17,9 +17,9 @@
   "sideEffects": false,
   "engines": { "node": ">=18" },
   "keywords": ["spss", "sav", "zsav", "parser", "reader", "browser", "statistics", "haven", "pspp", "data"],
-  "repository": { "type": "git", "url": "git+https://github.com/everydaydesign/spssread.git" },
-  "homepage": "https://github.com/everydaydesign/spssread#readme",
-  "bugs": "https://github.com/everydaydesign/spssread/issues",
+  "repository": { "type": "git", "url": "git+https://github.com/everydaydesign/spssreader.git" },
+  "homepage": "https://github.com/everydaydesign/spssreader#readme",
+  "bugs": "https://github.com/everydaydesign/spssreader/issues",
   "scripts": {
     "build": "tsup",
     "test": "bun test",
