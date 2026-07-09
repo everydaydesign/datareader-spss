@@ -1,8 +1,8 @@
-# spssreader
+# datareader-spss
 
 **Correct, zero-dependency SPSS `.sav`/`.zsav` reader for the browser and Node — validated against R [`haven`](https://haven.tidyverse.org/).**
 
-`spssreader` parses IBM SPSS system files (`.sav`) and their compressed variant (`.zsav`) into plain
+`datareader-spss` parses IBM SPSS system files (`.sav`) and their compressed variant (`.zsav`) into plain
 JavaScript values: numbers, strings, `Date`s, variable metadata, value labels, and declared missing
 values. It is written in pure TypeScript against Web platform APIs (`ArrayBuffer`, `DataView`,
 `TextDecoder`, `DecompressionStream`) — **no runtime dependencies**, and the same build runs in the
@@ -15,7 +15,7 @@ JavaScript ecosystem lacked a reader that decodes *real* files correctly — mos
 compression, ZSAV (zlib) blocks, very-long strings, encodings, or the exact bit-level meaning of
 system- vs. user-missing values. Getting any of those wrong silently corrupts data.
 
-`spssreader` was built to be correct first: every construct is validated value-for-value against R's
+`datareader-spss` was built to be correct first: every construct is validated value-for-value against R's
 `haven`/`ReadStat`, the de-facto reference implementation. It uses only Web APIs, so it ships as a
 single ESM module with zero dependencies and no native addons — drop it into a browser upload flow
 or a Node script alike.
@@ -23,13 +23,13 @@ or a Node script alike.
 ## Install
 
 ```bash
-npm i spssreader
+npm i datareader-spss
 ```
 
 ```bash
-bun add spssreader
-pnpm add spssreader
-yarn add spssreader
+bun add datareader-spss
+pnpm add datareader-spss
+yarn add datareader-spss
 ```
 
 ## Usage
@@ -37,7 +37,7 @@ yarn add spssreader
 ### Browser — a picked/dropped `File`
 
 ```ts
-import { readSav, applyUserMissing } from "spssreader";
+import { readSav, applyUserMissing } from "datareader-spss";
 
 const input = document.querySelector<HTMLInputElement>("#file");
 input.addEventListener("change", async () => {
@@ -60,7 +60,7 @@ input.addEventListener("change", async () => {
 
 ```tsx
 import { useState } from "react";
-import { readSav, applyUserMissing, type Sheet } from "spssreader";
+import { readSav, applyUserMissing, type Sheet } from "datareader-spss";
 
 export function SavImporter() {
   const [sheet, setSheet] = useState<Sheet | null>(null);
@@ -89,7 +89,7 @@ export function SavImporter() {
 
 ```ts
 import { readFile } from "node:fs/promises";
-import { readSav } from "spssreader";
+import { readSav } from "datareader-spss";
 
 const nodeBuf = await readFile("survey.sav");
 
@@ -108,7 +108,7 @@ for (const v of parsed.sheets[0].variables) {
 ### Reading variables and rows
 
 ```ts
-import { readSav, type CellValue } from "spssreader";
+import { readSav, type CellValue } from "datareader-spss";
 
 const { sheets, encoding } = await readSav(buffer);
 const { variables, rows } = sheets[0];
@@ -261,7 +261,7 @@ survey file. The oracle fixtures live alongside the source and are asserted on e
 
 ## Security & limits
 
-`spssreader` is designed to parse **untrusted** files safely. A hostile `.sav` cannot make it OOM or
+`datareader-spss` is designed to parse **untrusted** files safely. A hostile `.sav` cannot make it OOM or
 hang: every attacker-controlled allocation and loop is bounded, and any bound violation throws a
 catchable `SavError` rather than exhausting memory or spinning.
 
@@ -289,7 +289,7 @@ Recommendations for consumers:
 
 ## Roadmap
 
-`spssreader` reads modern little-endian `.sav`/`.zsav` files correctly today, and is intentionally
+`datareader-spss` reads modern little-endian `.sav`/`.zsav` files correctly today, and is intentionally
 read-only. On the map for future releases:
 
 - **Big-endian system files** — the header already detects byte order; big-endian *data* reading and
