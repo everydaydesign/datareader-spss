@@ -33,8 +33,11 @@ export function decodeFormat(
 export function decodeMissing(n: number, values: number[]): MissingSpec {
   if (n === 0) return { kind: "none" };
   if (n > 0) return { kind: "discrete", values };
-  if (n === -2) return { kind: "range", lo: values[0], hi: values[1] };
-  return { kind: "range+discrete", lo: values[0], hi: values[1], value: values[2] };
+  const [lo, hi, value] = values;
+  if (lo === undefined || hi === undefined) throw new SavError("missing-value range underflow");
+  if (n === -2) return { kind: "range", lo, hi };
+  if (value === undefined) throw new SavError("missing-value range+discrete underflow");
+  return { kind: "range+discrete", lo, hi, value };
 }
 
 /** Read a variable's `|n_missing|` trailing missing-value slots. A string variable (width > 0) stores

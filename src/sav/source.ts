@@ -64,7 +64,7 @@ class RleSource implements ValueSource {
       this.codes = this.cur.readBytes(8);
       this.idx = 0;
     }
-    return this.codes[this.idx++];
+    return this.codes[this.idx++]!; // idx is kept in 0..7 above; codes is always a length-8 array
   }
 
   /** Next cell-bearing control code: drains any peeked code, then skips 0 fillers (they encode no

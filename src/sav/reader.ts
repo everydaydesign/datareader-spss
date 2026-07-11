@@ -85,7 +85,7 @@ function segmentWidths(raw: RawDict, start: number, realWidth: number): number[]
   const n = Math.ceil(realWidth / 252);
   const widths: number[] = [];
   for (let s = 0; s < n && start + s < raw.variables.length; s++) {
-    widths.push(raw.variables[start + s].type);
+    widths.push(raw.variables[start + s]!.type); // loop bound keeps start + s in range
   }
   return widths;
 }
@@ -97,8 +97,9 @@ function buildPlans(raw: RawDict, ctx: BuildContext): VariablePlan[] {
   const plans: VariablePlan[] = [];
   let i = 0;
   while (i < raw.variables.length) {
-    const rawVar = raw.variables[i];
-    const variable = buildVariable(rawVar, i, raw.physicalIndexes[i], ctx);
+    const rawVar = raw.variables[i]!; // loop bound keeps i in range
+    // physicalIndexes is pushed in lockstep with variables (dictionary.ts), so index i is in range too
+    const variable = buildVariable(rawVar, i, raw.physicalIndexes[i]!, ctx);
     const realWidth = rawVar.type > 0 ? ctx.info.veryLong.get(rawVar.name) : undefined;
     if (realWidth === undefined) {
       plans.push({ variable, segments: rawVar.type > 0 ? [rawVar.type] : [] });

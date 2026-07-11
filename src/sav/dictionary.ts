@@ -48,7 +48,7 @@ function readValueLabelSet(cur: Cursor): RawValueLabelSet {
   const labels: RawValueLabel[] = [];
   for (let i = 0; i < count; i++) {
     const raw = cur.readBytes(8);
-    const labelLen = cur.readBytes(1)[0];
+    const labelLen = cur.readBytes(1)[0]!; // readBytes(1) returns a length-1 array or throws
     const labelRaw = cur.readBytes(labelLen);
     cur.skip((8 - ((1 + labelLen) % 8)) % 8);
     labels.push({ raw, labelRaw });

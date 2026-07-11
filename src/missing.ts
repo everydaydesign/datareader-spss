@@ -32,7 +32,10 @@ function isMissing(cell: CellValue, spec: MissingSpec): boolean {
 export function applyUserMissing(sheet: Sheet): Sheet {
   const specs = sheet.variables.map((v) => v.missing);
   const rows = sheet.rows.map((row) =>
-    row.map((cell, col) => (isMissing(cell, specs[col]) ? null : cell)),
+    row.map((cell, col) => {
+      const spec = specs[col]; // a row with more cells than variables leaves the extra cells as-is
+      return spec !== undefined && isMissing(cell, spec) ? null : cell;
+    }),
   );
   return { ...sheet, rows };
 }
