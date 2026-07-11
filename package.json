@@ -14,7 +14,8 @@
     }
   },
   "files": [
-    "dist",
+        "dist",
+        "CHANGELOG.md",
     "README.md",
     "LICENSE"
   ],
@@ -46,7 +47,8 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "fixtures": "Rscript oracle/generate-fixtures.R",
-    "prepublishOnly": "tsup && bun test"
+        "release": "npm version patch && git push --follow-tags",
+        "prepublishOnly": "tsup && bun test"
   },
   "devDependencies": {
     "@types/bun": "^1.1.14",
