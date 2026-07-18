@@ -1,15 +1,17 @@
 import type { Measure } from "../types";
 import type { RawDict, RawExtension } from "./dictionary";
 
+import { SavError } from "../limits";
+
 /** The subset of the SPSS dictionary recovered from the type-7 extension records: the true text
  * encoding, the system-missing sentinel, the short→long variable-name map, the short→char-width map
  * for very-long strings, and the per-variable measurement level (positional, dictionary order). */
 export type DictInfo = {
   encoding: string;
-  sysmis: number;
   longNames: Map<string, string>;
-  veryLong: Map<string, number>;
   measures: Measure[];
+  sysmis: number;
+  veryLong: Map<string, number>;
 };
 
 // Every extension payload we read here is ASCII/UTF-8 (charset names, `SHORT=LongName` tokens). The
@@ -73,6 +75,10 @@ function applyRecord(record: RawExtension, little: boolean, info: DictInfo): voi
       info.encoding = UTF8.decode(record.bytes).trim();
       break;
     case 4: // machine floating-point info: sysmis, highest, lowest — keep sysmis
+      // Reads a fresh DataView (not the bounds-checked Cursor), so guard the payload: a truncated
+      // subtype-4 (< 8 bytes) would otherwise throw a raw RangeError past the SavError contract.
+      if (record.bytes.length < 8)
+        throw new SavError("subtype-4 record too short for its sysmis f64");
       info.sysmis = viewOf(record.bytes).getFloat64(0, little);
       break;
     case 13:
@@ -94,10 +100,10 @@ function applyRecord(record: RawExtension, little: boolean, info: DictInfo): voi
 export function applyExtensions(raw: RawDict, little: boolean): DictInfo {
   const info: DictInfo = {
     encoding: "utf-8",
-    sysmis: -Number.MAX_VALUE,
     longNames: new Map(),
-    veryLong: new Map(),
     measures: [],
+    sysmis: -Number.MAX_VALUE,
+    veryLong: new Map(),
   };
   for (const record of raw.extensions) applyRecord(record, little, info);
   return info;

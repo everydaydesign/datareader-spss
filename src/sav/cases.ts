@@ -11,20 +11,25 @@ import { spssToDate } from "./dates";
  * allocated byte widths of the string segments to read and concatenate — one entry for a normal
  * string (≤ 255), N entries for a very-long string reassembled from N segments; empty for numerics. */
 export type VariablePlan = {
-  variable: Variable;
   segments: number[];
+  variable: Variable;
 };
 
-/** Map the file's declared charset name onto the three TextDecoder labels Bun's types accept
- * (`Bun.Encoding`): a plain `string` isn't assignable, so collapse it here without an `as` cast.
- * (The three-way mapping is validated by Task 9's encoding fixtures.) */
-export function toBunEncoding(enc: string): "utf-8" | "windows-1252" | "utf-16" {
-  const e = enc.toLowerCase();
-  if (e.includes("1252") || e.includes("ansi") || e.includes("8859") || e.includes("latin")) {
-    return "windows-1252";
+/** A `TextDecoder` for the file's declared (subtype-20) charset, passing the label STRAIGHT to the
+ * platform decoder instead of collapsing it onto one of three fixed labels (the old code silently
+ * turned Japanese/Chinese/Cyrillic text into mojibake). What a label resolves to depends on the
+ * runtime's decoder table: Node (full ICU) handles every WHATWG label; Bun — which the app's compute
+ * subprocess runs under — handles utf-8/utf-16, windows-1252/latin1, and the CJK codepages
+ * (shift_jis, gbk, big5, euc-jp), but NOT single-byte non-Latin pages like windows-1251/koi8-r. An
+ * empty name (no subtype-20) defaults to UTF-8. A label THIS runtime can't decode — or a bogus one —
+ * throws a `SavError`, so an unreadable codepage fails LOUDLY rather than silently mis-decoding
+ * (fail-loud beats the old fail-wrong; a zero-dep reader can't ship its own codepage tables). */
+export function decoderFor(enc: string): TextDecoder {
+  try {
+    return new TextDecoder(enc || "utf-8");
+  } catch {
+    throw new SavError(`unsupported character encoding "${enc}"`);
   }
-  if (e.includes("16")) return "utf-16";
-  return "utf-8";
 }
 
 /** Read one string segment: `ceil(alloc/8)` 8-byte chunks, keeping only the segment's first `alloc`
@@ -65,18 +70,21 @@ function readCell(plan: VariablePlan, source: ValueSource, dec: TextDecoder): Ce
   return readNumericCell(plan.variable, source);
 }
 
+type ReadCasesInput = {
+  dictInfo: DictInfo;
+  header: SavHeader;
+  limits: SavLimits;
+  plans: VariablePlan[];
+  source: ValueSource;
+};
+
 /** Read the flat data section into rows, one cell per plan in dictionary order. When the header
  * carries a real case count (`ncases >= 0`) exactly that many rows are read; when it is unknown
  * (`ncases = -1`, which real SPSS writes — e.g. the user's GenAI.sav — even though haven never does)
  * rows are read until the source reaches the end-of-data marker. */
-export function readCases(
-  header: SavHeader,
-  plans: VariablePlan[],
-  dictInfo: DictInfo,
-  source: ValueSource,
-  limits: SavLimits,
-): CellValue[][] {
-  const dec = new TextDecoder(toBunEncoding(dictInfo.encoding));
+export function readCases(input: ReadCasesInput): CellValue[][] {
+  const { dictInfo, header, limits, plans, source } = input;
+  const dec = decoderFor(dictInfo.encoding);
   const rows: CellValue[][] = [];
   if (header.ncases >= 0) {
     // Bounded upfront by readSav's `ncases × nvars ≤ maxCells` check before we get here.

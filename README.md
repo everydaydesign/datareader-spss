@@ -249,7 +249,7 @@ them — call `applyUserMissing(sheet)` to fold them to `null`. A variable's dec
 | Dates          | SPSS date/time formats decoded to JavaScript `Date`                 |
 | Value labels   | numeric and string value-label sets, resolved per variable          |
 | Missing values | discrete, range, range + discrete, and string missing specs         |
-| Encodings      | file-declared encoding via `TextDecoder` (UTF-8, windows-125x, …)   |
+| Encodings      | file-declared charset passed straight to the platform `TextDecoder`; unsupported labels rejected, never mis-decoded (see Security & limits) |
 | Endianness     | little-endian                                                       |
 
 ## Correctness
@@ -269,6 +269,12 @@ catchable `SavError` rather than exhausting memory or spinning.
 - The data-cell budget (`maxCells`) and the ZSAV inflate budget (`maxInflatedBytes`) are enforced
   while streaming, so a decompression bomb aborts before it materializes.
 - Malformed dictionaries, out-of-spec record counts, and truncated headers are rejected up front.
+- The file's declared charset (subtype-20) is handed straight to the runtime's `TextDecoder`. Node
+  (full ICU) decodes every WHATWG label; **Bun decodes a subset** — UTF-8/16, windows-1252/latin1,
+  and the CJK pages (shift_jis, gbk, big5, euc-jp), but not single-byte non-Latin pages such as
+  windows-1251/koi8-r. A charset the runtime can't decode throws a `SavError` rather than silently
+  producing mojibake — an unreadable codepage fails loud (a zero-dep reader ships no codepage tables
+  of its own).
 
 Tune the ceilings for memory-constrained environments:
 

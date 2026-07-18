@@ -1,8 +1,7 @@
+import type { CellValue, MissingSpec, Variable } from "../src/index.ts";
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-
-import type { CellValue, MissingSpec, Variable } from "../src/index.ts";
 
 import { readSav } from "../src/index.ts";
 
@@ -18,15 +17,15 @@ import { readSav } from "../src/index.ts";
 const SAV_PATH = join(import.meta.dir, "data/GenAI.sav");
 const EXPECTED_PATH = join(import.meta.dir, "data/genai.expected.json");
 
-type ExpectedLabel = { value: number | string; label: string };
+type ExpectedLabel = { label: string; value: number | string };
 type ExpectedVar = {
+  label?: string;
+  missing: MissingSpec;
   name: string;
   type: "numeric" | "string";
   valueKind: "number" | "string" | "date" | "datetime";
-  values: Array<number | string | null>;
-  missing: MissingSpec;
-  label?: string;
   valueLabels?: ExpectedLabel[];
+  values: Array<number | string | null>;
 };
 type Expected = { variables: ExpectedVar[] };
 
@@ -45,7 +44,7 @@ function isoSeconds(date: Date): string {
 
 /** Normalize value labels to a stable, order-independent shape (haven and the reader may differ in
  * emission order; the *set* of (value,label) pairs is what must match). */
-function sortedLabels(labels?: Array<{ value: CellValue; label: string }>): string[] {
+function sortedLabels(labels?: Array<{ label: string; value: CellValue }>): string[] {
   return (labels ?? []).map((l) => `${typeof l.value}|${String(l.value)}|${l.label}`).sort();
 }
 
@@ -54,14 +53,25 @@ function assertCell(cell: CellValue, expected: number | string | null, kind: str
     expect(cell).toBeNull();
     return;
   }
-  if (kind === "number") {
-    expect(cell as number).toBeCloseTo(expected as number, 12);
-  } else if (kind === "string") {
-    expect(cell).toBe(expected as string);
-  } else if (kind === "date") {
-    expect((cell as Date).toISOString().slice(0, 10)).toBe(expected as string);
-  } else {
-    expect(isoSeconds(cell as Date)).toBe(expected as string);
+  switch (kind) {
+    case "number": {
+      expect(cell as number).toBeCloseTo(expected as number, 12);
+
+      break;
+    }
+    case "string": {
+      expect(cell).toBe(expected as string);
+
+      break;
+    }
+    case "date": {
+      expect((cell as Date).toISOString().slice(0, 10)).toBe(expected as string);
+
+      break;
+    }
+    default: {
+      expect(isoSeconds(cell as Date)).toBe(expected as string);
+    }
   }
 }
 
@@ -73,21 +83,19 @@ function assertVariable(variable: Variable, expected: ExpectedVar): void {
   expect(sortedLabels(variable.valueLabels)).toEqual(sortedLabels(expected.valueLabels));
 }
 
-if (!existsSync(SAV_PATH)) {
-  test.skip("GenAI.sav not present — drop the private file at test/data/GenAI.sav (git-ignored) to run the real-world acceptance test", () => {});
-} else {
+if (existsSync(SAV_PATH)) {
   test("GenAI.sav real-world acceptance: 110 vars x 507 cases parse and match haven", async () => {
     const bytes = await Bun.file(SAV_PATH).arrayBuffer();
     // Parses without throwing — this exact file crashed jsavvy.
     const { sheets } = await readSav(bytes);
     expect(sheets.length).toBe(1);
-    const { variables, rows } = sheets[0];
+    const { rows, variables } = sheets[0]!;
     const expected = loadExpected();
 
     // Case count (~507) and variable count (110) match haven.
     expect(variables.length).toBe(expected.variables.length);
     expect(variables.length).toBe(110);
-    expect(rows.length).toBe(expected.variables[0].values.length);
+    expect(rows.length).toBe(expected.variables[0]!.values.length);
     expect(rows.length).toBe(507);
 
     // Variable names + types (and full metadata) match haven.
@@ -95,9 +103,11 @@ if (!existsSync(SAV_PATH)) {
 
     // The whole matrix — the real backstop for >=3-segment very-long strings and real-world edges.
     expected.variables.forEach((e, col) => {
-      assertVariable(variables[col], e);
+      assertVariable(variables[col]!, e);
       expect(rows.every((row) => row.length === expected.variables.length)).toBe(true);
-      e.values.forEach((exp, row) => assertCell(rows[row][col], exp, e.valueKind));
+      e.values.forEach((exp, row) => assertCell(rows[row]![col]!, exp, e.valueKind));
     });
   });
+} else {
+  test.skip("GenAI.sav not present — drop the private file at test/data/GenAI.sav (git-ignored) to run the real-world acceptance test", () => {});
 }

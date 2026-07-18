@@ -57,24 +57,24 @@ describe("dictionary-loop robustness (HT3)", () => {
   test("readHeader on a sub-176-byte $FL2 buffer throws SavError, not RangeError (L1)", () => {
     // A 4-byte "$FL2" passes the magic check but has no layout_code at offset 64 → getInt32(64)
     // would RangeError without the min-length guard.
-    const buf = new Uint8Array([...new TextEncoder().encode("$FL2")]).buffer;
+    const buf = new Uint8Array(new TextEncoder().encode("$FL2")).buffer;
     expect(() => readHeader(new Cursor(buf))).toThrow(SavError);
   });
 
   test("readSav on a sub-176-byte buffer rejects with SavError (L1)", async () => {
-    const buf = new Uint8Array([...new TextEncoder().encode("$FL2")]).buffer;
+    const buf = new Uint8Array(new TextEncoder().encode("$FL2")).buffer;
     await expect(readSav(buf)).rejects.toThrow(SavError);
   });
 
   test("subtype-11 measures record with size = 1 does not read past its bytes (M3)", () => {
     // count/3 = 10 triples claimed, but only 10 payload bytes exist: getInt32(t*12) would read OOB
     // (RangeError) for any t > 0 without the size guard. The guard stops before reading past bytes.
-    const bad: RawExtension = { subtype: 11, size: 1, count: 30, bytes: new Uint8Array(10) };
+    const bad: RawExtension = { bytes: new Uint8Array(10), count: 30, size: 1, subtype: 11 };
     const raw: RawDict = {
-      variables: [],
+      extensions: [bad],
       physicalIndexes: [],
       valueLabelSets: [],
-      extensions: [bad],
+      variables: [],
     };
     expect(() => applyExtensions(raw, true)).not.toThrow();
     expect(applyExtensions(raw, true).measures.length).toBeLessThan(Math.floor(30 / 3));

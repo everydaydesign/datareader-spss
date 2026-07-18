@@ -1,12 +1,12 @@
 export type {
   CellValue,
+  Format,
   Measure,
   MissingSpec,
+  ParsedFile,
+  Sheet,
   SpssFormat,
   Variable,
-  Format,
-  Sheet,
-  ParsedFile,
 } from "./types";
 export type { SavLimits } from "./limits";
 export { DEFAULT_LIMITS, SavError } from "./limits";

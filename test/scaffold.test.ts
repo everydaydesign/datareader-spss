@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
-
 import type { Format } from "../src/index.ts";
+
+import { describe, expect, test } from "bun:test";
 
 describe("scaffold", () => {
   test("types import and the basic fixture exists", async () => {

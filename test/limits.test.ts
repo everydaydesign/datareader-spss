@@ -114,10 +114,10 @@ describe("readSav resource bounds", () => {
   test("a normal file still parses with default limits", async () => {
     const bytes = await Bun.file(BASIC_SAV).arrayBuffer();
     const parsed = await readSav(bytes);
-    expect(parsed.sheets[0].variables.map((v) => v.name)).toEqual(["id", "score", "name"]);
-    expect(parsed.sheets[0].rows.length).toBe(3);
+    expect(parsed.sheets[0]!.variables.map((v) => v.name)).toEqual(["id", "score", "name"]);
+    expect(parsed.sheets[0]!.rows.length).toBe(3);
     // opts merge over defaults, not replace: a high override still parses.
     const withOpts = await readSav(bytes, { maxCells: DEFAULT_LIMITS.maxCells });
-    expect(withOpts.sheets[0].rows.length).toBe(3);
+    expect(withOpts.sheets[0]!.rows.length).toBe(3);
   });
 });

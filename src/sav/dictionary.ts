@@ -11,27 +11,27 @@ const MAX_DICT_RECORDS = 10_000_000;
 // (negative) would make `skip` — the one cursor primitive that can move backward — rewind the loop.
 const MAX_DOC_LINES = 100_000;
 
-export type RawValueLabel = { raw: Uint8Array; labelRaw: Uint8Array };
+export type RawValueLabel = { labelRaw: Uint8Array; raw: Uint8Array };
 export type RawValueLabelSet = { labels: RawValueLabel[]; varIndexes: number[] };
-export type RawExtension = { subtype: number; size: number; count: number; bytes: Uint8Array };
+export type RawExtension = { bytes: Uint8Array; count: number; size: number; subtype: number };
 
 export type RawDict = {
-  variables: RawVariable[];
+  extensions: RawExtension[];
   /** For each kept variable (same order as `variables`), its 1-based PHYSICAL dictionary position —
    * i.e. counting the type=-1 string-continuation records that `variables` drops. Type-4 value-label
    * variable indexes are physical, so labels must be matched against this, not the logical index. */
   physicalIndexes: number[];
   valueLabelSets: RawValueLabelSet[];
-  extensions: RawExtension[];
+  variables: RawVariable[];
 };
 
 type DictState = {
-  variables: RawVariable[];
+  extensions: RawExtension[];
+  pending?: RawValueLabelSet;
   physicalIndexes: number[];
   physicalPos: number; // 1-based position of the NEXT variable record (real or continuation)
   valueLabelSets: RawValueLabelSet[];
-  extensions: RawExtension[];
-  pending?: RawValueLabelSet;
+  variables: RawVariable[];
 };
 
 // The file's true encoding isn't known until the extension records are parsed (Task 6). Variable
@@ -51,7 +51,7 @@ function readValueLabelSet(cur: Cursor): RawValueLabelSet {
     const labelLen = cur.readBytes(1)[0]!; // readBytes(1) returns a length-1 array or throws
     const labelRaw = cur.readBytes(labelLen);
     cur.skip((8 - ((1 + labelLen) % 8)) % 8);
-    labels.push({ raw, labelRaw });
+    labels.push({ labelRaw, raw });
   }
   return { labels, varIndexes: [] };
 }
@@ -62,7 +62,7 @@ function readExtension(cur: Cursor): RawExtension {
   const subtype = cur.readI32();
   const size = cur.readI32();
   const count = cur.readI32();
-  return { subtype, size, count, bytes: cur.readBytes(size * count) };
+  return { bytes: cur.readBytes(size * count), count, size, subtype };
 }
 
 function handleVariable(cur: Cursor, state: DictState): void {
@@ -112,11 +112,11 @@ const HANDLERS: Record<number, (cur: Cursor, state: DictState) => void> = {
  * index record), and raw type-7 extension records for Task 6; type-6 document records are skipped. */
 export function readDictionary(cur: Cursor): RawDict {
   const state: DictState = {
-    variables: [],
+    extensions: [],
     physicalIndexes: [],
     physicalPos: 1,
     valueLabelSets: [],
-    extensions: [],
+    variables: [],
   };
   for (let records = 0; ; records++) {
     if (records > MAX_DICT_RECORDS) throw new SavError("too many dictionary records");
@@ -134,9 +134,9 @@ export function readDictionary(cur: Cursor): RawDict {
     if (cur.pos <= prev) throw new SavError("dictionary made no progress");
   }
   return {
-    variables: state.variables,
+    extensions: state.extensions,
     physicalIndexes: state.physicalIndexes,
     valueLabelSets: state.valueLabelSets,
-    extensions: state.extensions,
+    variables: state.variables,
   };
 }

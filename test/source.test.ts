@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
-
 import type { SavHeader } from "../src/sav/header.ts";
+
+import { describe, expect, test } from "bun:test";
 import { SavError } from "../src/limits.ts";
 import { Cursor } from "../src/sav/binary.ts";
 import { inflateZsav, makeSource } from "../src/sav/source.ts";
@@ -9,12 +9,16 @@ const SYSMIS = -Number.MAX_VALUE;
 const GENEROUS = 512 * 1024 * 1024; // well above every crafted block
 
 function header(compression: 0 | 1 | 2, bias = 100): SavHeader {
-  return { zlib: false, compression, bias, ncases: 0, fileLabel: "" };
+  return { bias, compression, fileLabel: "", ncases: 0, zlib: false };
 }
 
 async function deflate(bytes: Uint8Array): Promise<ArrayBuffer> {
   const cs = new CompressionStream("deflate");
-  return new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer();
+  // Fresh ArrayBuffer-backed copy: a generic Uint8Array<ArrayBufferLike> isn't a valid BlobPart
+  // under the DOM lib (mirrors src/sav/source.ts).
+  const copy = new Uint8Array(bytes.length);
+  copy.set(bytes);
+  return new Response(new Blob([copy]).stream().pipeThrough(cs)).arrayBuffer();
 }
 
 /** Frame `blockBytes` (deflated) as a minimal single-block ZSAV: ZHEADER (3×i64) + the deflate
@@ -144,15 +148,15 @@ describe("inflateZsav", () => {
     dv.setInt32(t + 16, 0, true); // block_size
     dv.setInt32(t + 20, 2, true); // n_blocks
     t += 24;
-    const desc = (uncOfs: number, cmpOfs: number, uncLen: number, cmpLen: number): void => {
-      dv.setBigInt64(t, BigInt(uncOfs), true);
-      dv.setBigInt64(t + 8, BigInt(cmpOfs), true);
-      dv.setInt32(t + 16, uncLen, true);
-      dv.setInt32(t + 20, cmpLen, true);
+    const desc = (d: { cmpLen: number; cmpOfs: number; uncLen: number; uncOfs: number }): void => {
+      dv.setBigInt64(t, BigInt(d.uncOfs), true);
+      dv.setBigInt64(t + 8, BigInt(d.cmpOfs), true);
+      dv.setInt32(t + 16, d.uncLen, true);
+      dv.setInt32(t + 20, d.cmpLen, true);
       t += 24;
     };
-    desc(0, block1, p1.length, c1.length);
-    desc(p1.length, block2, p2.length, c2.length);
+    desc({ cmpLen: c1.length, cmpOfs: block1, uncLen: p1.length, uncOfs: 0 });
+    desc({ cmpLen: c2.length, cmpOfs: block2, uncLen: p2.length, uncOfs: p1.length });
 
     const out = new Uint8Array(await inflateZsav(new Cursor(buf), GENEROUS));
     expect([...out]).toEqual([11, 22, 33, 44, 55, 66, 77]);

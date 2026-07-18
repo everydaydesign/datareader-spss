@@ -6,11 +6,11 @@ import { SavError } from "../limits";
 /** A compression-agnostic reader over a .sav data section: sequential numeric cells and 8-byte
  * string chunks. `nextNumeric` returns `null` for a system-missing (or end-of-data) value. */
 export interface ValueSource {
-  nextNumeric(): number | null;
-  nextString8(): Uint8Array;
   /** True when the next cell boundary is the end-of-data marker (or the stream is exhausted) — the
    * termination signal a reader uses when the header's case count is unknown (`ncases = -1`). */
   atEnd(): boolean;
+  nextNumeric(): number | null;
+  nextString8(): Uint8Array;
 }
 
 /** One ZSAV compressed block descriptor: where its deflate stream sits in the file and its length. */
@@ -101,13 +101,6 @@ class RleSource implements ValueSource {
   }
 }
 
-/** Read a byte-order-aware 64-bit signed int; file offsets/lengths fit in a JS number. */
-function readI64(cur: Cursor): number {
-  const v = cur.view.getBigInt64(cur.pos, cur.little);
-  cur.pos += 8;
-  return Number(v);
-}
-
 /** Copy the parts into one contiguous ArrayBuffer sized to their total length. */
 function concatToBuffer(parts: Uint8Array[]): ArrayBuffer {
   const total = parts.reduce((n, p) => n + p.length, 0);
@@ -149,15 +142,15 @@ async function inflateDeflate(compressed: Uint8Array, maxBytes: number): Promise
 /** Read the ZTRAILER at `ztrailerOfs` and return its per-block compressed descriptors. */
 function readTrailerBlocks(cur: Cursor, ztrailerOfs: number): ZBlock[] {
   cur.seek(ztrailerOfs);
-  readI64(cur); // bias
-  readI64(cur); // zero
+  cur.readI64(); // bias
+  cur.readI64(); // zero
   cur.readI32(); // block_size
   const nBlocks = cur.readI32();
   if (nBlocks < 0 || nBlocks > 1_000_000) throw new SavError("ZSAV block count out of range");
   const blocks: ZBlock[] = [];
   for (let i = 0; i < nBlocks; i++) {
-    readI64(cur); // uncompressed_ofs
-    const compressedOfs = readI64(cur);
+    cur.readI64(); // uncompressed_ofs
+    const compressedOfs = cur.readI64();
     cur.readI32(); // uncompressed_size
     blocks.push({ compressedOfs, compressedSize: cur.readI32() });
   }
@@ -179,9 +172,9 @@ export function makeSource(cur: Cursor, header: SavHeader, sysmis: number): Valu
  * `compress="zsav"` fixture in Task 9's oracle matrix. `maxInflatedBytes` caps the TOTAL inflated
  * output across all blocks (a streaming budget) so a decompression bomb throws instead of OOMing. */
 export async function inflateZsav(cur: Cursor, maxInflatedBytes: number): Promise<ArrayBuffer> {
-  readI64(cur); // zheader_ofs
-  const ztrailerOfs = readI64(cur);
-  readI64(cur); // ztrailer_len
+  cur.readI64(); // zheader_ofs
+  const ztrailerOfs = cur.readI64();
+  cur.readI64(); // ztrailer_len
   const blocks = readTrailerBlocks(cur, ztrailerOfs);
   const parts: Uint8Array[] = [];
   let total = 0;

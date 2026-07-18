@@ -13,6 +13,10 @@ export type SavLimits = {
   maxInflatedBytes: number;
 };
 
+// `maxCells` is deliberately 10× the sibling csv/excel readers' 5M: `.sav` is a statistical survey
+// format where wide, tall matrices are routine, so a 5M default would reject real datasets. A
+// memory-tight consumer passes its own `maxCells`; an app embedding all three readers should enforce
+// one budget upstream (as EasyPLS does) rather than rely on these per-reader defaults matching.
 export const DEFAULT_LIMITS: SavLimits = {
   maxCells: 50_000_000,
   maxInflatedBytes: 512 * 1024 * 1024,

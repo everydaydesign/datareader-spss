@@ -81,7 +81,7 @@ describe("readDictionary", () => {
 
   test("reads the type-3 value-label set and attaches the type-4 var indexes", () => {
     expect(dict.valueLabelSets.length).toBe(1);
-    const set = dict.valueLabelSets[0];
+    const set = dict.valueLabelSets[0]!;
     const dec = new TextDecoder("utf-8");
     expect(set.labels.map((l) => dec.decode(l.labelRaw))).toEqual(["Low", "High"]);
     expect(set.labels.map((l) => f64Of(l.raw))).toEqual([1, 2]);
@@ -90,7 +90,7 @@ describe("readDictionary", () => {
 
   test("captures the type-7 extension record's payload verbatim", () => {
     expect(dict.extensions.length).toBe(1);
-    const ext = dict.extensions[0];
+    const ext = dict.extensions[0]!;
     expect(ext.subtype).toBe(13);
     expect(ext.size).toBe(1);
     expect(ext.count).toBe(4);

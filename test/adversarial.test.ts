@@ -62,7 +62,11 @@ function toBuffer(parts: number[][]): ArrayBuffer {
 /** Deflate `bytes` through the platform CompressionStream (the inverse of the reader's inflate). */
 async function deflate(bytes: Uint8Array): Promise<Uint8Array> {
   const cs = new CompressionStream("deflate");
-  const ab = await new Response(new Blob([bytes]).stream().pipeThrough(cs)).arrayBuffer();
+  // Fresh ArrayBuffer-backed copy: a generic Uint8Array<ArrayBufferLike> isn't a valid BlobPart
+  // under the DOM lib (mirrors src/sav/source.ts).
+  const copy = new Uint8Array(bytes.length);
+  copy.set(bytes);
+  const ab = await new Response(new Blob([copy]).stream().pipeThrough(cs)).arrayBuffer();
   return new Uint8Array(ab);
 }
 
@@ -73,7 +77,7 @@ async function deflate(bytes: Uint8Array): Promise<Uint8Array> {
 async function craftZsavFile(
   block: Uint8Array,
   ncases: number,
-): Promise<{ buf: ArrayBuffer; base: number }> {
+): Promise<{ base: number; buf: ArrayBuffer }> {
   const prefix = new Uint8Array([header176("$FL3", 2, ncases), numericVar(), terminator()].flat());
   const base = prefix.length;
   const compressed = await deflate(block);
@@ -97,7 +101,7 @@ async function craftZsavFile(
   const buf = new Uint8Array(base + section.byteLength);
   buf.set(prefix, 0);
   buf.set(new Uint8Array(section), base);
-  return { buf: buf.buffer, base };
+  return { base, buf: buf.buffer };
 }
 
 describe("adversarial fuzz gate — every hostile .sav rejected with SavError (HT4)", () => {
@@ -165,7 +169,7 @@ describe("adversarial fuzz gate — every hostile .sav rejected with SavError (H
   test(
     "H4 — ZSAV with huge nBlocks rejects at the block-count sanity cap",
     async () => {
-      const { buf, base } = await craftZsavFile(new Uint8Array([1, 2, 3]), 1);
+      const { base, buf } = await craftZsavFile(new Uint8Array([1, 2, 3]), 1);
       // Patch n_blocks past the sanity cap; ztrailer_ofs (absolute) lives at ZHEADER+8.
       const trailerOfs = Number(new DataView(buf).getBigInt64(base + 8, true));
       new DataView(buf).setInt32(trailerOfs + 20, 2_000_000, true);
@@ -224,7 +228,7 @@ describe("adversarial fuzz gate — every hostile .sav rejected with SavError (H
         expect(e).toBeInstanceOf(SavError);
         return null;
       });
-      if (result !== null) expect(result.sheets[0].variables).toHaveLength(1);
+      if (result !== null) expect(result.sheets[0]!.variables).toHaveLength(1);
     },
     FAST,
   );
@@ -236,6 +240,63 @@ describe("adversarial fuzz gate — every hostile .sav rejected with SavError (H
       const truncated = new Uint8Array(64);
       truncated.set([...new TextEncoder().encode("$FL2")], 0);
       await expect(readSav(truncated.buffer)).rejects.toThrow(SavError);
+    },
+    FAST,
+  );
+});
+
+describe("2026-07-18 audit residuals — charset / bounds / layout / VLS guards", () => {
+  test(
+    "charset — subtype-20 with an unsupported label rejects with SavError (no silent utf-8 fallback)",
+    async () => {
+      const badEnc = [...new TextEncoder().encode("not-a-real-charset")];
+      const encExt = [...le32(7), ...le32(20), ...le32(1), ...le32(badEnc.length), ...badEnc];
+      const buf = toBuffer([header176("$FL2", 0, 0), numericVar(), encExt, terminator()]);
+      await expect(readSav(buf)).rejects.toThrow(SavError);
+    },
+    FAST,
+  );
+
+  test(
+    "bounds — a dictionary truncated mid-variable-record rejects with SavError, not a raw RangeError",
+    async () => {
+      // A valid 176-byte header then a lone rec_type=2 with no room for the fields that follow: the
+      // next Cursor read lands past EOF and must surface as SavError via the bounds guard.
+      const buf = toBuffer([header176("$FL2", 1, 1), le32(2)]);
+      await expect(readSav(buf)).rejects.toThrow(SavError);
+    },
+    FAST,
+  );
+
+  test(
+    "layout — an invalid layout_code (neither 2 nor 3 in either byte order) rejects with SavError",
+    async () => {
+      const buf = toBuffer([header176("$FL2", 1, 1), numericVar(), terminator()]);
+      new DataView(buf).setInt32(64, 5, true); // corrupt the byte-order probe
+      await expect(readSav(buf)).rejects.toThrow(SavError);
+    },
+    FAST,
+  );
+
+  test(
+    "VLS — a very-long string whose declared segments outnumber its records rejects with SavError",
+    async () => {
+      // subtype-14 declares v1 a 300-wide VLS ⇒ ceil(300/252)=2 segment records expected, but only one
+      // variable record exists. The old loop silently consumed the following variable (or nothing) as
+      // segment 2 and dropped it; the guard rejects the shortfall instead.
+      const stringVar = [
+        ...le32(2), // rec_type
+        ...le32(8), // type = 8-byte string (one clean segment, no continuations)
+        ...le32(0), // has_label
+        ...le32(0), // n_missing
+        ...le32(0), // print
+        ...le32(0), // write
+        ...nameBytes("v1"),
+      ];
+      const vlsBytes = [...new TextEncoder().encode("v1=300\0")];
+      const vlsExt = [...le32(7), ...le32(14), ...le32(1), ...le32(vlsBytes.length), ...vlsBytes];
+      const buf = toBuffer([header176("$FL2", 0, 0), stringVar, vlsExt, terminator()]);
+      await expect(readSav(buf)).rejects.toThrow(SavError);
     },
     FAST,
   );

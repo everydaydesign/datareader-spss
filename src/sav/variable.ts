@@ -9,13 +9,17 @@ import { SavError } from "../limits";
 const VALID_NMISSING = new Set([-3, -2, 0, 1, 2, 3]);
 
 export type RawVariable = {
-  name: string;
-  type: number;
   label?: string;
   missing: MissingSpec;
+  name: string;
   print: SpssFormat;
+  type: number;
   write: SpssFormat;
 };
+
+/** The two fields describing a variable's trailing missing-value slots: the signed count and the
+ * variable width/type (`> 0` = string). Grouped to keep `readMissing` within the parameter budget. */
+type MissingRead = { nMissing: number; type: number };
 
 /** Unpack SPSS's 3-byte format code: byte0 decimals, byte1 width, byte2 type. `isDate` stays a
  * defaulted pure predicate so this module needs no forward dep on date detection (wired in Task 8). */
@@ -26,7 +30,7 @@ export function decodeFormat(
   const decimals = packed & 0xff;
   const width = (packed >> 8) & 0xff;
   const type = (packed >> 16) & 0xff;
-  return { type, width, decimals, isDate: isDate(type) };
+  return { decimals, isDate: isDate(type), type, width };
 }
 
 /** Map n_missing_values to a MissingSpec: 0 none · >0 discrete · -2 range · -3 range+one discrete. */
@@ -35,9 +39,9 @@ export function decodeMissing(n: number, values: number[]): MissingSpec {
   if (n > 0) return { kind: "discrete", values };
   const [lo, hi, value] = values;
   if (lo === undefined || hi === undefined) throw new SavError("missing-value range underflow");
-  if (n === -2) return { kind: "range", lo, hi };
+  if (n === -2) return { hi, kind: "range", lo };
   if (value === undefined) throw new SavError("missing-value range+discrete underflow");
-  return { kind: "range+discrete", lo, hi, value };
+  return { hi, kind: "range+discrete", lo, value };
 }
 
 /** Read a variable's `|n_missing|` trailing missing-value slots. A string variable (width > 0) stores
@@ -45,7 +49,8 @@ export function decodeMissing(n: number, values: number[]): MissingSpec {
  * counts select range / range+discrete). String missing counts are always positive (no ranges).
  * String slots are decoded with `dec` (the dictionary-time provisional decoder — ASCII-safe for the
  * short sentinels SPSS allows here; a non-ASCII string sentinel would need the file encoding). */
-function readMissing(cur: Cursor, nMissing: number, type: number, dec: TextDecoder): MissingSpec {
+function readMissing(cur: Cursor, spec: MissingRead, dec: TextDecoder): MissingSpec {
+  const { nMissing, type } = spec;
   const count = Math.abs(nMissing);
   if (type > 0) {
     const values: string[] = [];
@@ -79,6 +84,6 @@ export function readVariableRecord(cur: Cursor, dec: TextDecoder): RawVariable |
     label = cur.readStr(labelLen, dec);
     cur.skip((4 - (labelLen % 4)) % 4);
   }
-  const missing = readMissing(cur, nMissing, type, dec);
-  return { name, type, label, missing, print, write };
+  const missing = readMissing(cur, { nMissing, type }, dec);
+  return { label, missing, name, print, type, write };
 }

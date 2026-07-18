@@ -7,18 +7,23 @@ import type { RawVariable } from "./variable";
 
 import { DEFAULT_LIMITS, SavError } from "../limits";
 import { Cursor } from "./binary";
-import { readCases, toBunEncoding } from "./cases";
+import { decoderFor, readCases } from "./cases";
 import { isDateFormat } from "./dates";
 import { readDictionary } from "./dictionary";
 import { applyExtensions } from "./extensions";
 import { readHeader } from "./header";
 import { inflateZsav, makeSource } from "./source";
 
-type ValueLabel = { value: CellValue; label: string };
+type ValueLabel = { label: string; value: CellValue };
 
 /** Everything `buildVariable`/`buildPlans` need beyond the raw variable itself, bundled so the
  * builders stay within the parameter budget. */
-type BuildContext = { info: DictInfo; sets: RawValueLabelSet[]; little: boolean; dec: TextDecoder };
+type BuildContext = { dec: TextDecoder; info: DictInfo; little: boolean; sets: RawValueLabelSet[] };
+
+/** One raw variable plus its two positional indices, grouped so `buildVariable` stays within the
+ * parameter budget. `index` is the 0-based logical position (extension-derived measure); `physicalIndex`
+ * is 1-based and counts string continuations (value-label indexing). */
+type VarSlot = { index: number; physicalIndex: number; rawVar: RawVariable };
 
 /** Read 8 raw value-label bytes as a numeric f64 key, in the file's byte order. */
 function rawToF64(raw: Uint8Array, little: boolean): number {
@@ -32,10 +37,9 @@ function rawToF64(raw: Uint8Array, little: boolean): number {
 function valueLabelsFor(
   physicalIndex: number,
   isString: boolean,
-  sets: RawValueLabelSet[],
-  little: boolean,
-  dec: TextDecoder,
+  ctx: BuildContext,
 ): ValueLabel[] | undefined {
+  const { dec, little, sets } = ctx;
   const out: ValueLabel[] = [];
   for (const set of sets) {
     if (!set.varIndexes.includes(physicalIndex)) continue;
@@ -43,7 +47,7 @@ function valueLabelsFor(
       const value = isString
         ? dec.decode(entry.raw).replace(/ +$/, "")
         : rawToF64(entry.raw, little);
-      out.push({ value, label: dec.decode(entry.labelRaw).replace(/\0+$/, "") });
+      out.push({ label: dec.decode(entry.labelRaw).replace(/\0+$/, ""), value });
     }
   }
   return out.length > 0 ? out : undefined;
@@ -52,28 +56,24 @@ function valueLabelsFor(
 /** The name/type/format/measure common to every variable, before optional fields are attached. */
 function baseVariable(rawVar: RawVariable, index: number, info: DictInfo): Variable {
   return {
-    name: info.longNames.get(rawVar.name) ?? rawVar.name,
-    type: rawVar.type > 0 ? "string" : "numeric",
-    missing: rawVar.missing,
     format: { ...rawVar.print, isDate: isDateFormat(rawVar.print.type) },
     measure: info.measures[index] ?? "unknown",
+    missing: rawVar.missing,
+    name: info.longNames.get(rawVar.name) ?? rawVar.name,
+    type: rawVar.type > 0 ? "string" : "numeric",
   };
 }
 
 /** Assemble one `Variable` from its raw record plus the extension-derived long name, measure, real
  * date-format flag, and any value labels resolved against the owning variable's numeric/string kind.
  * `physicalIndex` is the variable's 1-based position INCLUDING continuations (value-label indexing). */
-function buildVariable(
-  rawVar: RawVariable,
-  index: number,
-  physicalIndex: number,
-  ctx: BuildContext,
-): Variable {
+function buildVariable(slot: VarSlot, ctx: BuildContext): Variable {
+  const { index, physicalIndex, rawVar } = slot;
   const isString = rawVar.type > 0;
   const variable = baseVariable(rawVar, index, ctx.info);
   if (rawVar.label !== undefined) variable.label = rawVar.label;
   if (isString) variable.width = rawVar.type;
-  const valueLabels = valueLabelsFor(physicalIndex, isString, ctx.sets, ctx.little, ctx.dec);
+  const valueLabels = valueLabelsFor(physicalIndex, isString, ctx);
   if (valueLabels) variable.valueLabels = valueLabels;
   return variable;
 }
@@ -84,8 +84,17 @@ function buildVariable(
 function segmentWidths(raw: RawDict, start: number, realWidth: number): number[] {
   const n = Math.ceil(realWidth / 252);
   const widths: number[] = [];
-  for (let s = 0; s < n && start + s < raw.variables.length; s++) {
-    widths.push(raw.variables[start + s]!.type); // loop bound keeps start + s in range
+  for (let s = 0; s < n; s++) {
+    const rec = raw.variables[start + s];
+    // A well-formed VLS is followed by exactly n string-typed (type > 0) segment records. On a
+    // shortfall (fewer records, or the next variable is numeric/absent) the old loop silently
+    // consumed that following variable as a "segment" and dropped it — reject the malformed file.
+    if (!rec || rec.type <= 0) {
+      throw new SavError(
+        `very-long string declares width ${realWidth} (${n} segments) but its segment records are missing or non-string`,
+      );
+    }
+    widths.push(rec.type);
   }
   return widths;
 }
@@ -99,16 +108,19 @@ function buildPlans(raw: RawDict, ctx: BuildContext): VariablePlan[] {
   while (i < raw.variables.length) {
     const rawVar = raw.variables[i]!; // loop bound keeps i in range
     // physicalIndexes is pushed in lockstep with variables (dictionary.ts), so index i is in range too
-    const variable = buildVariable(rawVar, i, raw.physicalIndexes[i]!, ctx);
+    const variable = buildVariable(
+      { index: i, physicalIndex: raw.physicalIndexes[i]!, rawVar },
+      ctx,
+    );
     const realWidth = rawVar.type > 0 ? ctx.info.veryLong.get(rawVar.name) : undefined;
     if (realWidth === undefined) {
-      plans.push({ variable, segments: rawVar.type > 0 ? [rawVar.type] : [] });
+      plans.push({ segments: rawVar.type > 0 ? [rawVar.type] : [], variable });
       i += 1;
       continue;
     }
     const segments = segmentWidths(raw, i, realWidth);
     variable.width = realWidth;
-    plans.push({ variable, segments });
+    plans.push({ segments, variable });
     i += segments.length;
   }
   return plans;
@@ -124,8 +136,8 @@ export async function readSav(buf: ArrayBuffer, opts?: Partial<SavLimits>): Prom
   const raw = readDictionary(cur);
   const info = applyExtensions(raw, cur.little);
   const little = cur.little; // capture before a ZSAV swap: the bytecode literals keep the file's order
-  const dec = new TextDecoder(toBunEncoding(info.encoding));
-  const plans = buildPlans(raw, { info, sets: raw.valueLabelSets, little, dec });
+  const dec = decoderFor(info.encoding);
+  const plans = buildPlans(raw, { dec, info, little, sets: raw.valueLabelSets });
   const variables = plans.map((plan) => plan.variable);
   // No variables ⇒ every row consumes 0 cells, so the unknown-count (`ncases = -1`) loop can never
   // advance — reject instead of spinning forever.
@@ -141,6 +153,6 @@ export async function readSav(buf: ArrayBuffer, opts?: Partial<SavLimits>): Prom
     cur.little = little;
   }
   const source = makeSource(cur, header, info.sysmis);
-  const rows = readCases(header, plans, info, source, limits);
-  return { format: "sav", encoding: info.encoding, sheets: [{ name: "data", variables, rows }] };
+  const rows = readCases({ dictInfo: info, header, limits, plans, source });
+  return { encoding: info.encoding, format: "sav", sheets: [{ name: "data", rows, variables }] };
 }

@@ -2,31 +2,32 @@ import type { RawDict, RawExtension } from "../src/sav/dictionary.ts";
 
 import { describe, expect, test } from "bun:test";
 
+import { SavError } from "../src/limits.ts";
 import { applyExtensions } from "../src/sav/extensions.ts";
 
 // Extension payloads are built little-endian (the crafted file's byte order) and read back with
 // applyExtensions(raw, true) — mirroring how the real reader passes the header's endianness through.
 function strExt(subtype: number, s: string): RawExtension {
   const bytes = new TextEncoder().encode(s);
-  return { subtype, size: 1, count: bytes.length, bytes };
+  return { bytes, count: bytes.length, size: 1, subtype };
 }
 
 function f64Ext(subtype: number, nums: number[]): RawExtension {
   const buf = new ArrayBuffer(nums.length * 8);
   const dv = new DataView(buf);
   nums.forEach((n, i) => dv.setFloat64(i * 8, n, true));
-  return { subtype, size: 8, count: nums.length, bytes: new Uint8Array(buf) };
+  return { bytes: new Uint8Array(buf), count: nums.length, size: 8, subtype };
 }
 
 function i32Ext(subtype: number, ints: number[]): RawExtension {
   const buf = new ArrayBuffer(ints.length * 4);
   const dv = new DataView(buf);
   ints.forEach((n, i) => dv.setInt32(i * 4, n, true));
-  return { subtype, size: 4, count: ints.length, bytes: new Uint8Array(buf) };
+  return { bytes: new Uint8Array(buf), count: ints.length, size: 4, subtype };
 }
 
 function dict(extensions: RawExtension[]): RawDict {
-  return { variables: [], physicalIndexes: [], valueLabelSets: [], extensions };
+  return { extensions, physicalIndexes: [], valueLabelSets: [], variables: [] };
 }
 
 describe("applyExtensions", () => {
@@ -77,8 +78,8 @@ describe("applyExtensions defaults", () => {
   test("unhandled subtypes (3/17/18/21/22) are ignored, not thrown", () => {
     const info = applyExtensions(
       dict([
-        { subtype: 3, size: 4, count: 8, bytes: new Uint8Array(32) },
-        { subtype: 22, size: 1, count: 4, bytes: new Uint8Array(4) },
+        { bytes: new Uint8Array(32), count: 8, size: 4, subtype: 3 },
+        { bytes: new Uint8Array(4), count: 4, size: 1, subtype: 22 },
         strExt(20, "utf-8"),
       ]),
       true,
@@ -89,5 +90,12 @@ describe("applyExtensions defaults", () => {
   test('unknown measure code → "unknown"', () => {
     const info = applyExtensions(dict([i32Ext(11, [9, 0, 0])]), true);
     expect(info.measures).toEqual(["unknown"]);
+  });
+
+  test("subtype 4 shorter than its 8-byte sysmis f64 → SavError (P1)", () => {
+    // A 1-byte subtype-4 payload would make getFloat64(0) throw a raw RangeError; the guard turns it
+    // into the catchable SavError the reader's error contract promises.
+    const short: RawExtension = { bytes: new Uint8Array(1), count: 1, size: 1, subtype: 4 };
+    expect(() => applyExtensions(dict([short]), true)).toThrow(SavError);
   });
 });
