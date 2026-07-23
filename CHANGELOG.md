@@ -3,6 +3,18 @@
 All notable changes to `@easypls/datareader-spss` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this package uses semantic versioning.
 
+## 0.2.1 — 2026-07-23
+
+### Fixed
+
+- **A malformed very-long-string width no longer hangs the parser (denial of service).** A subtype-14
+  record declaring a width of `0`, a negative number, or a non-numeric token made the segment count
+  `ceil(width/252)` collapse to `0`/`NaN`, so the dictionary walk never advanced and looped forever,
+  growing memory without bound until the process (or browser tab) crashed. Because it was a hang and
+  not a throw, `try/catch` around `readSav` offered no protection. Such a width is now rejected with a
+  catchable `SavError`, and the walk is guaranteed to advance by at least one. Surfaced by an
+  automated security scan.
+
 ## 0.2.0 — 2026-07-18
 
 Turns several silent-misparse and raw-`RangeError` classes into clear, catchable `SavError`s, and

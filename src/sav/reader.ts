@@ -118,10 +118,19 @@ function buildPlans(raw: RawDict, ctx: BuildContext): VariablePlan[] {
       i += 1;
       continue;
     }
+    // A width of 0, negative, or NaN makes segmentWidths' ceil(width/252) <= 0/NaN, so it returns []
+    // without throwing and `i += 0` spins buildPlans forever (CWE-835). Reject the malformed width.
+    if (!Number.isInteger(realWidth) || realWidth < 1) {
+      throw new SavError(
+        `very-long string "${rawVar.name}" declares an invalid width ${realWidth}`,
+      );
+    }
     const segments = segmentWidths(raw, i, realWidth);
     variable.width = realWidth;
     plans.push({ segments, variable });
-    i += segments.length;
+    // Width validated >= 1 ⇒ segments is non-empty (or segmentWidths threw), so this always advances;
+    // Math.max is a belt-and-suspenders guarantee the dictionary walk can never stall.
+    i += Math.max(1, segments.length);
   }
   return plans;
 }

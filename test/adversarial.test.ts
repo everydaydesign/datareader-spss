@@ -300,4 +300,28 @@ describe("2026-07-18 audit residuals — charset / bounds / layout / VLS guards"
     },
     FAST,
   );
+
+  test(
+    "VLS — a non-positive or non-numeric declared width rejects with SavError (no hang)",
+    async () => {
+      // A width of 0, negative, or NaN makes ceil(width/252) <= 0/NaN, so segmentWidths returns []
+      // and buildPlans' `i += 0` would spin forever (CWE-835). Each must reject FAST, not hang.
+      const stringVar = [
+        ...le32(2), // rec_type
+        ...le32(8), // type = 8-byte string
+        ...le32(0), // has_label
+        ...le32(0), // n_missing
+        ...le32(0), // print
+        ...le32(0), // write
+        ...nameBytes("v1"),
+      ];
+      for (const width of ["0", "-5", "xyz"]) {
+        const vlsBytes = [...new TextEncoder().encode(`v1=${width}\0`)];
+        const vlsExt = [...le32(7), ...le32(14), ...le32(1), ...le32(vlsBytes.length), ...vlsBytes];
+        const buf = toBuffer([header176("$FL2", 0, 0), stringVar, vlsExt, terminator()]);
+        await expect(readSav(buf)).rejects.toThrow(SavError);
+      }
+    },
+    FAST,
+  );
 });
