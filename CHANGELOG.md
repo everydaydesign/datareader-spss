@@ -12,8 +12,7 @@ All notable changes to `@easypls/datareader-spss` are documented here. The forma
   `ceil(width/252)` collapse to `0`/`NaN`, so the dictionary walk never advanced and looped forever,
   growing memory without bound until the process (or browser tab) crashed. Because it was a hang and
   not a throw, `try/catch` around `readSav` offered no protection. Such a width is now rejected with a
-  catchable `SavError`, and the walk is guaranteed to advance by at least one. Surfaced by an
-  automated security scan.
+  catchable `SavError`, and the walk is guaranteed to advance by at least one.
 
 ## 0.2.0 — 2026-07-18
 
